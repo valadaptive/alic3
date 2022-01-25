@@ -34,11 +34,21 @@ const COND_ZERO: u16 = 0b010;
 const COND_POSITIVE: u16 = 0b001;
 
 pub struct CpuState {
+    /// All CPU registers
     registers: Registers,
+    /// RAM
     memory: Memory,
+    /// Program counter
     pc: u16,
-    cc: u16,
-    psr: u16
+    /// Program status register.
+    /// `psr[15]` is 1 if running in user mode, 0 if in supervisor mode.
+    /// `psr[10:8]` specifies the priority level of the currently running process.
+    /// `psr[2:0]` holds condition codes (set depending on whether the previous result was positive, negative, or zero)
+    psr: u16,
+    /// The saved user mode stack pointer
+    saved_usp: u16,
+    /// The saved supervisor mode stack pointer
+    saved_ssp: u16
 }
 
 #[repr(u8)]
@@ -98,7 +108,7 @@ fn sign_extend<const NUM_BITS: usize>(n: i16) -> i16 {
 }
 
 fn address_accessible(addr: u16, cpu_state: &CpuState) -> bool {
-    // Only protect memory if PSR[15] == 1
+    // Only protect memory if not in privileged mode
     if get_bits::<15, 15>(cpu_state.psr) == 0 {
         return true;
     }
@@ -186,7 +196,8 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
             };
 
             cpu_state.registers.set(get_bits::<9, 11>(instruction) as usize, result);
-            cpu_state.cc = match (result as i16).signum() {
+            // Replace lower 3 bits of PSR with the new condition bits
+            cpu_state.psr = (cpu_state.psr & !0b111) | match (result as i16).signum() {
                 -1 => COND_NEGATIVE,
                 0 => COND_ZERO,
                 1 => COND_POSITIVE,
@@ -196,7 +207,8 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
 
         Opcode::Br => {
             let nzp = get_bits::<9, 11>(instruction);
-            if (nzp & cpu_state.cc) > 0 {
+            // This will only match the lowest 3 bits, which store the condition codes
+            if (nzp & cpu_state.psr) > 0 {
                 let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
                 cpu_state.pc = u16::wrapping_add(cpu_state.pc, pc_offset as u16);
             }
@@ -207,7 +219,8 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
         },
 
         Opcode::Jsr => {
-            cpu_state.registers.set(7, cpu_state.pc);
+            let old_pc = cpu_state.pc;
+
             if get_bits::<11, 11>(instruction) == 1 {
                 // JSR: PC-relative
                 let pc_offset = sign_extend::<11>(get_bits::<0, 10>(instruction) as i16);
@@ -216,6 +229,9 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
                 // JSRR: absolute
                 cpu_state.pc = get_reg_lo(instruction, cpu_state);
             }
+
+            // Make sure to set R7 *after* potentially reading the program counter from it (e.g. a JSRR)
+            cpu_state.registers.set(7, old_pc);
         },
 
         Opcode::St | Opcode::Sti => {
