@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::env::args;
+use std::ops::Index;
+use std::ops::IndexMut;
 
 mod bit_twiddling;
 mod opcode;
@@ -13,17 +15,27 @@ use crate::opcode::*;
 
 const MEMORY_SIZE: usize = u16::MAX as usize;
 
+/// Program status register.
+/// `psr[15]` is 1 if running in user mode, 0 if in supervisor mode.
+/// `psr[10:8]` specifies the priority level of the currently running process.
+/// `psr[2:0]` holds condition codes (set depending on whether the previous result was positive, negative, or zero)
+const PSR: u16 = 0xFFFC;
+
 struct Memory {
     memory: [u16; MEMORY_SIZE]
 }
 
-impl Memory {
-    fn get(&self, idx: u16) -> u16 {
-        self.memory[idx as usize]
-    }
+impl Index<u16> for Memory {
+    type Output = u16;
 
-    fn set(&mut self, idx: u16, value: u16) {
-        self.memory[idx as usize] = value;
+    fn index(&self, index: u16) -> &Self::Output {
+        &self.memory[index as usize]
+    }
+}
+
+impl IndexMut<u16> for Memory {
+    fn index_mut(&mut self, index: u16) -> &mut Self::Output {
+        &mut self.memory[index as usize]
     }
 }
 
@@ -38,11 +50,6 @@ pub struct Cpu {
     memory: Memory,
     /// Program counter
     pc: u16,
-    /// Program status register.
-    /// `psr[15]` is 1 if running in user mode, 0 if in supervisor mode.
-    /// `psr[10:8]` specifies the priority level of the currently running process.
-    /// `psr[2:0]` holds condition codes (set depending on whether the previous result was positive, negative, or zero)
-    psr: u16,
     /// The saved user mode stack pointer
     saved_usp: u16,
     /// The saved supervisor mode stack pointer
@@ -55,19 +62,59 @@ impl Cpu {
             registers: [0u16; 8],
             memory: Memory {memory: [0u16; MEMORY_SIZE]},
             pc: 0u16,
-            psr: 0u16,
-            saved_ssp: 0u16,
-            saved_usp: 0u16
+            // We decrement the stack pointer before writing and increment after reading, so these start at 1 after the
+            // addresses at which the stack actually begins. Stacks grow downwards in memory.
+            saved_ssp: 0x3000,
+            saved_usp: 0xFE00
         }
     }
 
     fn address_accessible(&self, addr: u16) -> bool {
         // Only protect memory if not in privileged mode
-        if get_bits::<15, 15>(self.psr) == 0 {
+        if get_bits::<15, 15>(self.memory[PSR]) == 0 {
             return true;
         }
 
         addr >= 0x3000 && addr <= 0xFDFF
+    }
+
+    fn enter_supervisor_mode(&mut self) {
+        let old_psr = self.memory[PSR];
+        if get_bits::<15, 15>(self.memory[PSR]) == 1 {
+            // Switch from the user stack pointer to the system stack pointer
+            self.saved_usp = self.registers[6];
+            self.registers[6] = self.saved_ssp;
+            self.memory[PSR] &= !(1 << 15);
+        }
+        // Push old PSR and PC to stack
+        self.registers[6] -= 1;
+        self.memory[self.registers[6]] = old_psr;
+        self.registers[6] -= 1;
+        self.memory[self.registers[6]] =  self.pc;
+    }
+
+    fn handle_exception(&mut self, exception_vector: u8) {
+        // TODO: it's possible to trigger an exception in an exception handler, etc. ad infinitum.
+        // A triple-fault handler would technically be against spec but probably useful.
+        self.enter_supervisor_mode();
+        let exception_addr = (exception_vector as u16) | 0x0100;
+        self.pc = exception_addr;
+    }
+
+    fn handle_interrupt(&mut self, interrupt_vector: u8, priority_level: u16) {
+        if priority_level <= self.get_priority_level() {return}
+
+        self.handle_exception(interrupt_vector);
+        self.set_priority_level(priority_level);
+    }
+
+    fn get_priority_level(&self) -> u16 {
+        return (self.memory[PSR] >> 8) & 0b111;
+    }
+
+    fn set_priority_level(&mut self, level: u16) {
+        assert!(level <= 7);
+        self.memory[PSR] = (self.memory[PSR] & !0b11100000000) | (level << 8);
     }
 
     fn get_reg_hi(&self, instruction: u16) -> u16 {
@@ -114,20 +161,23 @@ impl Cpu {
                             // load direct
                             Opcode::Ld => {
                                 if !self.address_accessible(addr) {
-                                    unimplemented!()
+                                    self.handle_exception(0x02);
+                                    return;
                                 }
-                                self.memory.get(addr)
+                                self.memory[addr]
                             },
                             // load indirect
                             Opcode::Ldi => {
                                 if !self.address_accessible(addr) {
-                                    unimplemented!()
+                                    self.handle_exception(0x02);
+                                    return;
                                 }
-                                let indirect_addr = self.memory.get(addr);
-                                if !self.address_accessible(indirect_addr) {
-                                    unimplemented!()
+                                let indirect_addr = self.memory[addr];
+                                if !self.address_accessible(addr) {
+                                    self.handle_exception(0x02);
+                                    return;
                                 }
-                                self.memory.get(indirect_addr)
+                                self.memory[indirect_addr]
                             },
                             _ => unreachable!()
                         }
@@ -137,9 +187,10 @@ impl Cpu {
                         let offset = sign_extend::<6>(get_bits::<0, 5>(instruction) as i16);
                         let addr = u16::wrapping_add( self.get_reg_lo(instruction), offset as u16);
                         if !self.address_accessible(addr) {
-                            unimplemented!()
+                            self.handle_exception(0x02);
+                            return;
                         }
-                        self.memory.get(addr)
+                        self.memory[addr]
                     },
 
                     Opcode::Not => {
@@ -151,7 +202,7 @@ impl Cpu {
 
                 self.registers[get_bits::<9, 11>(instruction) as usize] = result;
                 // Replace lower 3 bits of PSR with the new condition bits
-                self.psr = (self.psr & !0b111) | match (result as i16).signum() {
+                self.memory[PSR] = (self.memory[PSR] & !0b111) | match (result as i16).signum() {
                     -1 => COND_NEGATIVE,
                     0 => COND_ZERO,
                     1 => COND_POSITIVE,
@@ -162,7 +213,7 @@ impl Cpu {
             Opcode::Br => {
                 let nzp = get_bits::<9, 11>(instruction);
                 // This will only match the lowest 3 bits, which store the condition codes
-                if (nzp & self.psr) > 0 {
+                if (nzp & self.memory[PSR]) > 0 {
                     let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
                     self.pc = u16::wrapping_add(self.pc, pc_offset as u16);
                 }
@@ -170,6 +221,23 @@ impl Cpu {
 
             Opcode::Jmp => {
                 self.pc = self.get_reg_lo(instruction);
+
+                // Undocumented JMPT/RTT instruction. No idea who came up with this or where it is or isn't implemented.
+                // If the LSB of the instruction is set, the user mode bit is set to 1.
+                // The only other way to do this is to modify the PSR directly.
+                // Commenting this out for now because I have no idea about the specifics of its functionality.
+                /* if get_bits::<0, 0>(instruction) == 1 {
+                    if get_bits::<15, 15>(self.memory[PSR]) == 1 {
+                        // Tried to execute JMPT/RTT from user mode--trigger a privilege mode violation
+                        // TODO: do the emulators actually do this? do they even check the privilege bit at all?
+                        // how has no one actually fully implemented this architecture?
+                        self.handle_exception(0x00);
+                        return;
+                    }
+
+                    // Set user-mode PSR bit
+                    self.memory[PSR] |= 1 << 15;
+                } */
             },
 
             Opcode::Jsr => {
@@ -193,54 +261,64 @@ impl Cpu {
                 let mut addr = u16::wrapping_add(self.pc, pc_offset as u16);
 
                 if !self.address_accessible(addr) {
-                    unimplemented!()
+                    self.handle_exception(0x02);
+                    return;
                 }
 
                 // read address from memory if indirect store
                 if let Opcode::Sti = opcode {
-                    addr = self.memory.get(addr);
+                    addr = self.memory[addr];
                     if !self.address_accessible(addr) {
-                        unimplemented!()
+                        self.handle_exception(0x02);
                     }
                 }
 
-                self.memory.set(addr, self.get_reg_hi(instruction));
+                self.memory[addr] = self.get_reg_hi(instruction);
             },
 
             Opcode::Str => {
                 let offset = sign_extend::<6>(get_bits::<0, 5>(instruction) as i16);
                 let addr = u16::wrapping_add(self.get_reg_lo(instruction), offset as u16);
                 if !self.address_accessible(addr) {
-                    unimplemented!()
+                    self.handle_exception(0x02);
+                    return;
                 }
-                self.memory.set(addr, self.get_reg_hi(instruction));
+                self.memory[addr] = self.get_reg_hi(instruction);
             },
 
-            Opcode::Rti => unimplemented!(),
+            Opcode::Rti => {
+                if get_bits::<15, 15>(self.memory[PSR]) == 1 {
+                    // Tried to execute RTI from user mode--trigger a privilege mode violation
+                    self.handle_exception(0x00);
+                    return;
+                }
+
+                // Restore PC from supervisor stack pointer
+                self.pc = self.memory[self.registers[6]];
+                self.registers[6] += 1;
+
+                // TODO: the book says to pop the system stack before restoring the PSR. Why?
+                let new_psr = self.memory[self.registers[6]];
+                self.registers[6] += 1;
+                self.memory[PSR] = new_psr;
+
+                if get_bits::<15, 15>(self.memory[PSR]) == 1 {
+                    // We are now back in user mode
+                    self.saved_ssp = self.registers[6];
+                    self.registers[6] = self.saved_usp;
+                }
+            },
 
             Opcode::Reserved => {
-                panic!("illegal opcode")
+                self.handle_exception(0x01);
             },
 
             Opcode::Trap => {
-                let old_psr = self.psr;
-                if get_bits::<15, 15>(self.psr) == 1 {
-                    // Switch from the user stack pointer to the system stack pointer
-                    self.saved_usp = self.registers[6];
-                    self.registers[6] = self.saved_ssp;
-                    // Zero out the 15th PSR bit (the "in user mode" bit)
-                    self.psr &= !(1 << 15);
-                }
-                // Push old PSR and PC to stack
-                // TODO: do we increment before or after?
-                self.memory.set(self.registers[6], old_psr);
-                self.registers[6] += 1;
-                self.memory.set(self.registers[6], self.pc);
-                self.registers[6] += 1;
+                self.enter_supervisor_mode();
 
                 // Jump into code specified by trap vector table
                 // TODO: does this mean we don't increment the instruction pointer?
-                self.pc = self.memory.get(get_bits::<0, 7>(instruction));
+                self.pc = self.memory[get_bits::<0, 7>(instruction)];
             }
         }
     }
