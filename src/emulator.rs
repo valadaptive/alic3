@@ -34,6 +34,7 @@ impl Memory {
             0xFE00 => self.keyboard_io.borrow_mut().read_kbsr(),
             // Keyboard data register
             0xFE02 => self.keyboard_io.borrow_mut().read_kbdr(),
+            // Display status register--the display is always ready for more data
             0xFE04 => 0x8000,
             _ => self.memory[addr as usize],
         }
@@ -45,8 +46,11 @@ impl Memory {
             0xFE00 | 0xFE02 | 0xFE04 => (),
             // Display data register
             0xFE06 => {
-                self.stdout.write_u8((value & 0xFF) as u8);
-                self.stdout.flush();
+                // Ignore potential errors writing to stdout
+                let _ = self.stdout.write_u8((value & 0xFF) as u8);
+                // TODO: flushing stdout after every character seems expensive but also the only way to ensure proper
+                // emulation.
+                let _ = self.stdout.flush();
             }
             _ => {
                 self.memory[addr as usize] = value;
@@ -154,9 +158,13 @@ impl Cpu {
             // Switch from the user stack pointer to the system stack pointer
             self.saved_usp = self.registers[6];
             self.registers[6] = self.saved_ssp;
+            // Clear the "is user mode" bit of the PSR
             self.memory.set(PSR, self.memory.get(PSR) & !(1 << 15));
         }
 
+        // An implementation following the book will push the old PSR and PC to the stack, to be restored later by RTI.
+        // This allows for arbitrary nesting of system calls. In practice, I haven't come across an emulator that
+        // actually implements RTI, and instead trap handlers store the PC in R7 and seem to not preserve the PSR.
         #[cfg(feature = "by_the_book")]
         {
             // Push old PSR and PC to stack
@@ -194,18 +202,25 @@ impl Cpu {
             .set(PSR, (self.memory.get(PSR) & !0b11100000000) | (level << 8));
     }
 
+    /// Read the contents of the register specified in the high bits of an instruction (a common operation).
+    /// This is usually the destination register for an operation, but can be the source register if we're starved for
+    /// bits.
     fn get_reg_hi(&self, instruction: u16) -> u16 {
         self.registers[get_bits::<9, 11>(instruction) as usize]
     }
 
+    /// Read the contents of the register specified in the low bits of an instruction (a common operation).
+    /// This is the source/base register for most operations.
     fn get_reg_lo(&self, instruction: u16) -> u16 {
         self.registers[get_bits::<6, 8>(instruction) as usize]
     }
 
+    /// Decode and execute a single instruction. Specialized based on opcode.
     pub fn execute_instruction<const OP: u8>(&mut self, instruction: u16) {
         let opcode = Opcode::from_int(OP);
 
         match opcode {
+            // These opcodes all set the condition codes after doing some work
             Opcode::Add
             | Opcode::And
             | Opcode::Ld
@@ -415,6 +430,10 @@ impl Cpu {
         // println!("PC: {:#06x}, instruction: {:#06x} ({})", self.pc, instruction, disassemble_instruction(instruction));
         self.pc = self.pc.wrapping_add(1);
         let op = get_bits::<12, 15>(instruction);
+
+        // We take advantage of const generics to compile 16 specialized code paths through execute_instruction
+        // depending on which instruction it is. This seemingly redundant code is necessary because these are basically
+        // 16 different functions--the opcode's essentially a template parameter which must be known at compile time.
         match op {
             0 => self.execute_instruction::<0>(instruction),
             1 => self.execute_instruction::<1>(instruction),
