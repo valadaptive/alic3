@@ -1,4 +1,3 @@
-
 #[repr(u8)]
 #[derive(PartialEq, Eq)]
 pub enum Opcode {
@@ -24,7 +23,7 @@ impl Opcode {
     pub const fn from_int(i: u8) -> Self {
         match Self::try_from_int(i) {
             Ok(op) => op,
-            Err(_) => panic!("unknown opcode")
+            Err(_) => panic!("unknown opcode"),
         }
     }
 
@@ -46,7 +45,7 @@ impl Opcode {
             13 => Ok(Opcode::Reserved),
             14 => Ok(Opcode::Lea),
             15 => Ok(Opcode::Trap),
-            _ => Err(())
+            _ => Err(()),
         }
     }
 }

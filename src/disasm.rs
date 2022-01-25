@@ -1,4 +1,4 @@
-use std::{fs::File, env::args, io::Read};
+use std::{env::args, fs::File, io::Read};
 
 mod bit_twiddling;
 mod opcode;
@@ -18,7 +18,8 @@ fn main() -> anyhow::Result<()> {
     let mut buf: [u8; MEMORY_SIZE * 2] = [0u8; MEMORY_SIZE * 2];
     let num_bytes = file.read(&mut buf)?;
 
-    buf[0..num_bytes].chunks(2)
+    buf[0..num_bytes]
+        .chunks(2)
         .enumerate()
         .for_each(|(i, chunk)| {
             let instruction = ((chunk[0] as u16) << 8) | (chunk[1] as u16);
@@ -27,11 +28,14 @@ fn main() -> anyhow::Result<()> {
             if let Ok(opcode) = opcode {
                 match opcode {
                     Opcode::Add | Opcode::And => {
-                        parts.push(match opcode {
-                            Opcode::Add => "ADD",
-                            Opcode::And => "AND",
-                            _ => unreachable!()
-                        }.to_string());
+                        parts.push(
+                            match opcode {
+                                Opcode::Add => "ADD",
+                                Opcode::And => "AND",
+                                _ => unreachable!(),
+                            }
+                            .to_string(),
+                        );
 
                         parts.push(format!("R{}", get_bits::<9, 11>(instruction)));
                         parts.push(format!("R{}", get_bits::<6, 8>(instruction)));
@@ -51,7 +55,9 @@ fn main() -> anyhow::Result<()> {
                 // TODO
             }
 
-            if (parts.len() > 0) {println!("{}", parts.join(" "))};
+            if (parts.len() > 0) {
+                println!("{}", parts.join(" "))
+            };
         });
 
     Ok(())

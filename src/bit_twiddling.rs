@@ -1,5 +1,8 @@
 pub fn get_bits<const START: usize, const END: usize>(n: u16) -> u16 {
-    assert!(END <= 15 && START <= END, "start and end bits out of bounds");
+    assert!(
+        END <= 15 && START <= END,
+        "start and end bits out of bounds"
+    );
     let mask = u16::MAX >> (15 - (END - START));
     (n >> START) & mask
 }

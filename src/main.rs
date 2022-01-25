@@ -1,15 +1,15 @@
 use std::cell::RefCell;
-use std::fs::File;
-use std::io::{Stdin, Stdout, stdout};
-use std::io::prelude::*;
 use std::env::args;
+use std::fs::File;
+use std::io::prelude::*;
 use std::io::stdin;
+use std::io::{stdout, Stdin, Stdout};
 
 mod bit_twiddling;
 mod opcode;
 
-use byteorder::{WriteBytesExt, BigEndian};
 use byteorder::ReadBytesExt;
+use byteorder::{BigEndian, WriteBytesExt};
 
 use crate::bit_twiddling::*;
 use crate::opcode::*;
@@ -29,7 +29,7 @@ const MCR: u16 = 0xFFFE;
 struct Memory {
     memory: [u16; MEMORY_SIZE],
     keyboard_io: RefCell<KeyboardIO>,
-    stdout: Stdout
+    stdout: Stdout,
 }
 
 impl Memory {
@@ -40,7 +40,7 @@ impl Memory {
             // Keyboard data register
             0xFE02 => self.keyboard_io.borrow_mut().read_kbdr(),
             0xFE04 => 0x8000,
-            _ => self.memory[addr as usize]
+            _ => self.memory[addr as usize],
         }
     }
 
@@ -52,7 +52,7 @@ impl Memory {
             0xFE06 => {
                 self.stdout.write_u8((value & 0xFF) as u8);
                 self.stdout.flush();
-            },
+            }
             _ => {
                 self.memory[addr as usize] = value;
             }
@@ -64,7 +64,7 @@ struct KeyboardIO {
     need_more_input: bool,
     kbsr: bool,
     kbdr: u16,
-    stdin: Stdin
+    stdin: Stdin,
 }
 
 impl KeyboardIO {
@@ -73,7 +73,7 @@ impl KeyboardIO {
             need_more_input: true,
             kbsr: false,
             kbdr: 0,
-            stdin
+            stdin,
         }
     }
 
@@ -90,7 +90,11 @@ impl KeyboardIO {
             self.update_input();
         }
 
-        if self.kbsr {0x8000} else {0x0000}
+        if self.kbsr {
+            0x8000
+        } else {
+            0x0000
+        }
     }
 
     fn read_kbdr(&mut self) -> u16 {
@@ -130,7 +134,7 @@ impl Cpu {
             memory: Memory {
                 memory: mem_raw,
                 keyboard_io: RefCell::new(KeyboardIO::new(stdin)),
-                stdout
+                stdout,
             },
             pc: 0u16,
             // We decrement the stack pointer before writing and increment after reading, so these start at 1 after the
@@ -158,7 +162,8 @@ impl Cpu {
             self.memory.set(PSR, self.memory.get(PSR) & !(1 << 15));
         }
 
-        #[cfg(feature = "by_the_book")] {
+        #[cfg(feature = "by_the_book")]
+        {
             // Push old PSR and PC to stack
             self.registers[6] -= 1;
             self.memory.set(self.registers[6], old_psr);
@@ -176,7 +181,9 @@ impl Cpu {
     }
 
     fn handle_interrupt(&mut self, interrupt_vector: u8, priority_level: u16) {
-        if priority_level <= self.get_priority_level() {return}
+        if priority_level <= self.get_priority_level() {
+            return;
+        }
 
         self.handle_exception(interrupt_vector);
         self.set_priority_level(priority_level);
@@ -188,7 +195,8 @@ impl Cpu {
 
     fn set_priority_level(&mut self, level: u16) {
         assert!(level <= 7);
-        self.memory.set(PSR, (self.memory.get(PSR) & !0b11100000000) | (level << 8));
+        self.memory
+            .set(PSR, (self.memory.get(PSR) & !0b11100000000) | (level << 8));
     }
 
     fn get_reg_hi(&self, instruction: u16) -> u16 {
@@ -203,27 +211,30 @@ impl Cpu {
         let opcode = Opcode::from_int(OP);
 
         match opcode {
-            Opcode::Add |
-            Opcode::And |
-            Opcode::Ld |
-            Opcode::Ldi |
-            Opcode::Ldr |
-            Opcode::Lea |
-            Opcode::Not => {
+            Opcode::Add
+            | Opcode::And
+            | Opcode::Ld
+            | Opcode::Ldi
+            | Opcode::Ldr
+            | Opcode::Lea
+            | Opcode::Not => {
                 let result = match opcode {
                     Opcode::Add | Opcode::And => {
-                        let src_value_2 = if get_bits::<5, 5>(instruction) == 1 { // immediate mode
+                        let src_value_2 = if get_bits::<5, 5>(instruction) == 1 {
+                            // immediate mode
                             sign_extend::<5>(get_bits::<0, 4>(instruction) as i16) as u16
                         } else {
                             self.registers[get_bits::<0, 2>(instruction) as usize]
                         };
 
                         match opcode {
-                            Opcode::Add => u16::wrapping_add(self.get_reg_lo(instruction), src_value_2),
+                            Opcode::Add => {
+                                u16::wrapping_add(self.get_reg_lo(instruction), src_value_2)
+                            }
                             Opcode::And => self.get_reg_lo(instruction) & src_value_2,
                             _ => unreachable!(),
                         }
-                    },
+                    }
 
                     Opcode::Ld | Opcode::Ldi | Opcode::Lea => {
                         let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
@@ -239,7 +250,7 @@ impl Cpu {
                                     return;
                                 }
                                 self.memory.get(addr)
-                            },
+                            }
                             // load indirect
                             Opcode::Ldi => {
                                 if !self.address_accessible(addr) {
@@ -252,37 +263,39 @@ impl Cpu {
                                     return;
                                 }
                                 self.memory.get(indirect_addr)
-                            },
-                            _ => unreachable!()
+                            }
+                            _ => unreachable!(),
                         }
-                    },
+                    }
 
                     Opcode::Ldr => {
                         let offset = sign_extend::<6>(get_bits::<0, 5>(instruction) as i16);
-                        let addr = u16::wrapping_add( self.get_reg_lo(instruction), offset as u16);
+                        let addr = u16::wrapping_add(self.get_reg_lo(instruction), offset as u16);
                         if !self.address_accessible(addr) {
                             self.handle_exception(0x02);
                             return;
                         }
                         self.memory.get(addr)
-                    },
+                    }
 
-                    Opcode::Not => {
-                        !self.get_reg_lo(instruction)
-                    },
+                    Opcode::Not => !self.get_reg_lo(instruction),
 
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
 
                 self.registers[get_bits::<9, 11>(instruction) as usize] = result;
                 // Replace lower 3 bits of PSR with the new condition bits
-                self.memory.set(PSR, (self.memory.get(PSR) & !0b111) | match (result as i16).signum() {
-                    -1 => COND_NEGATIVE,
-                    0 => COND_ZERO,
-                    1 => COND_POSITIVE,
-                    _ => unreachable!()
-                });
-            },
+                self.memory.set(
+                    PSR,
+                    (self.memory.get(PSR) & !0b111)
+                        | match (result as i16).signum() {
+                            -1 => COND_NEGATIVE,
+                            0 => COND_ZERO,
+                            1 => COND_POSITIVE,
+                            _ => unreachable!(),
+                        },
+                );
+            }
 
             Opcode::Br => {
                 let nzp = get_bits::<9, 11>(instruction);
@@ -291,7 +304,7 @@ impl Cpu {
                     let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
                     self.pc = u16::wrapping_add(self.pc, pc_offset as u16);
                 }
-            },
+            }
 
             Opcode::Jmp => {
                 self.pc = self.get_reg_lo(instruction);
@@ -312,7 +325,7 @@ impl Cpu {
                     // Set user-mode PSR bit
                     self.memory.get(PSR) |= 1 << 15;
                 } */
-            },
+            }
 
             Opcode::Jsr => {
                 let old_pc = self.pc;
@@ -328,7 +341,7 @@ impl Cpu {
 
                 // Make sure to set R7 *after* potentially reading the program counter from it (e.g. a JSRR)
                 self.registers[7] = old_pc;
-            },
+            }
 
             Opcode::St | Opcode::Sti => {
                 let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
@@ -348,7 +361,7 @@ impl Cpu {
                 }
 
                 self.memory.set(addr, self.get_reg_hi(instruction));
-            },
+            }
 
             Opcode::Str => {
                 let offset = sign_extend::<6>(get_bits::<0, 5>(instruction) as i16);
@@ -358,7 +371,7 @@ impl Cpu {
                     return;
                 }
                 self.memory.set(addr, self.get_reg_hi(instruction));
-            },
+            }
 
             Opcode::Rti => {
                 if get_bits::<15, 15>(self.memory.get(PSR)) == 1 {
@@ -381,17 +394,18 @@ impl Cpu {
                     self.saved_ssp = self.registers[6];
                     self.registers[6] = self.saved_usp;
                 }
-            },
+            }
 
             Opcode::Reserved => {
                 self.handle_exception(0x01);
-            },
+            }
 
             Opcode::Trap => {
                 self.enter_supervisor_mode();
 
                 // It's not documented anywhere in the book, but TRAP sets R7 to the previous PC
-                #[cfg(not(feature = "by_the_book"))] {
+                #[cfg(not(feature = "by_the_book"))]
+                {
                     self.registers[7] = self.pc;
                 }
 
@@ -423,7 +437,7 @@ impl Cpu {
             13 => self.execute_instruction::<13>(instruction),
             14 => self.execute_instruction::<14>(instruction),
             15 => self.execute_instruction::<15>(instruction),
-            _ => unreachable!()
+            _ => unreachable!(),
         };
     }
 }
@@ -432,11 +446,9 @@ fn read_program_to_cpu(mut file: File, cpu: &mut Cpu) -> std::io::Result<()> {
     let mut buf = Vec::new();
     let origin = file.read_u16::<BigEndian>()? as usize;
     file.read_to_end(&mut buf)?;
-    buf.chunks(2)
-        .enumerate()
-        .for_each(|(i, chunk)| {
-            cpu.memory.memory[i + origin] = ((chunk[0] as u16) << 8) | (chunk[1] as u16)
-        });
+    buf.chunks(2).enumerate().for_each(|(i, chunk)| {
+        cpu.memory.memory[i + origin] = ((chunk[0] as u16) << 8) | (chunk[1] as u16)
+    });
     Ok(())
 }
 
@@ -445,11 +457,14 @@ fn disassemble_instruction(instruction: u16) -> String {
     let opcode = Opcode::from_int(get_bits::<12, 15>(instruction) as u8);
     match opcode {
         Opcode::Add | Opcode::And => {
-            parts.push(match opcode {
-                Opcode::Add => "ADD",
-                Opcode::And => "AND",
-                _ => unreachable!()
-            }.to_string());
+            parts.push(
+                match opcode {
+                    Opcode::Add => "ADD",
+                    Opcode::And => "AND",
+                    _ => unreachable!(),
+                }
+                .to_string(),
+            );
 
             parts.push(format!("R{}", get_bits::<9, 11>(instruction)));
             parts.push(format!("R{}", get_bits::<6, 8>(instruction)));
@@ -459,7 +474,7 @@ fn disassemble_instruction(instruction: u16) -> String {
             } else {
                 parts.push(format!("R{}", get_bits::<0, 2>(instruction)));
             }
-        },
+        }
 
         Opcode::Not => {
             parts.push("NOT".to_string());
@@ -470,21 +485,22 @@ fn disassemble_instruction(instruction: u16) -> String {
         Opcode::Br => {
             let nzp = get_bits::<9, 11>(instruction);
             let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
-            parts.push(format!("BR{}{}{}",
-                if nzp & 0b100 == 0 {""} else {"n"},
-                if nzp & 0b010 == 0 {""} else {"z"},
-                if nzp & 0b001 == 0 {""} else {"p"},
+            parts.push(format!(
+                "BR{}{}{}",
+                if nzp & 0b100 == 0 { "" } else { "n" },
+                if nzp & 0b010 == 0 { "" } else { "z" },
+                if nzp & 0b001 == 0 { "" } else { "p" },
             ));
             parts.push(format!("{:#06x}", pc_offset));
-        },
+        }
 
         Opcode::Jmp => {
             let base_register = get_bits::<6, 8>(instruction);
-            parts.push(if base_register == 7 {"RET"} else {"JMP"}.to_string());
+            parts.push(if base_register == 7 { "RET" } else { "JMP" }.to_string());
             if base_register != 7 {
                 parts.push(format!("R{}", base_register));
             }
-        },
+        }
 
         Opcode::Jsr => {
             if get_bits::<11, 11>(instruction) == 1 {
@@ -497,43 +513,49 @@ fn disassemble_instruction(instruction: u16) -> String {
                 parts.push("JSRR".to_string());
                 parts.push(format!("R{}", get_bits::<6, 8>(instruction)));
             }
-        },
+        }
 
         Opcode::Ld | Opcode::Ldi | Opcode::Lea | Opcode::St | Opcode::Sti => {
             let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
 
-            parts.push(match opcode {
-                // load effective address: just return the address
-                Opcode::Lea => "LEA",
-                // load direct
-                Opcode::Ld => "LD",
-                // load indirect
-                Opcode::Ldi => "LDI",
-                Opcode::St => "ST",
-                Opcode::Sti => "STI",
-                _ => unreachable!()
-            }.to_string());
+            parts.push(
+                match opcode {
+                    // load effective address: just return the address
+                    Opcode::Lea => "LEA",
+                    // load direct
+                    Opcode::Ld => "LD",
+                    // load indirect
+                    Opcode::Ldi => "LDI",
+                    Opcode::St => "ST",
+                    Opcode::Sti => "STI",
+                    _ => unreachable!(),
+                }
+                .to_string(),
+            );
 
             parts.push(format!("R{}", get_bits::<9, 11>(instruction)));
 
             parts.push(format!("{:#06x}", pc_offset));
-        },
+        }
 
         Opcode::Ldr | Opcode::Str => {
-            parts.push(match opcode{
-                Opcode::Ldr => "LDR",
-                Opcode::Str => "STR",
-                _ => unreachable!()
-            }.to_string());
+            parts.push(
+                match opcode {
+                    Opcode::Ldr => "LDR",
+                    Opcode::Str => "STR",
+                    _ => unreachable!(),
+                }
+                .to_string(),
+            );
             parts.push(format!("R{}", get_bits::<9, 11>(instruction)));
             parts.push(format!("R{}", get_bits::<6, 8>(instruction)));
             let offset = sign_extend::<6>(get_bits::<0, 5>(instruction) as i16);
             parts.push(format!("{:#06x}", offset));
-        },
+        }
 
         Opcode::Rti => {
             parts.push("RTI".to_string());
-        },
+        }
 
         Opcode::Reserved => {
             parts.push("[reserved]".to_string());
