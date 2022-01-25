@@ -17,25 +17,13 @@ impl Memory {
     }
 }
 
-struct Registers([u16; 8]);
-
-impl Registers {
-    fn get(&self, idx: usize) -> u16 {
-        self.0[idx]
-    }
-
-    fn set(&mut self, idx: usize, value: u16) {
-        self.0[idx] = value;
-    }
-}
-
 const COND_NEGATIVE: u16 = 0b100;
 const COND_ZERO: u16 = 0b010;
 const COND_POSITIVE: u16 = 0b001;
 
 pub struct CpuState {
     /// All CPU registers
-    registers: Registers,
+    registers: [u16; 8],
     /// RAM
     memory: Memory,
     /// Program counter
@@ -117,11 +105,11 @@ fn address_accessible(addr: u16, cpu_state: &CpuState) -> bool {
 }
 
 fn get_reg_hi(instruction: u16, cpu_state: &CpuState) -> u16 {
-    cpu_state.registers.get(get_bits::<9, 11>(instruction) as usize)
+    cpu_state.registers[get_bits::<9, 11>(instruction) as usize]
 }
 
 fn get_reg_lo(instruction: u16, cpu_state: &CpuState) -> u16 {
-    cpu_state.registers.get(get_bits::<6, 8>(instruction) as usize)
+    cpu_state.registers[get_bits::<6, 8>(instruction) as usize]
 }
 
 pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuState) {
@@ -140,7 +128,7 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
                     let src_value_2 = if get_bits::<5, 5>(instruction) == 1 { // immediate mode
                         get_bits::<0, 4>(instruction)
                     } else {
-                        cpu_state.registers.get(get_bits::<0, 2>(instruction) as usize)
+                        cpu_state.registers[get_bits::<0, 2>(instruction) as usize]
                     };
 
                     match opcode {
@@ -195,7 +183,7 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
                 _ => unreachable!()
             };
 
-            cpu_state.registers.set(get_bits::<9, 11>(instruction) as usize, result);
+            cpu_state.registers[get_bits::<9, 11>(instruction) as usize] = result;
             // Replace lower 3 bits of PSR with the new condition bits
             cpu_state.psr = (cpu_state.psr & !0b111) | match (result as i16).signum() {
                 -1 => COND_NEGATIVE,
@@ -231,7 +219,7 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
             }
 
             // Make sure to set R7 *after* potentially reading the program counter from it (e.g. a JSRR)
-            cpu_state.registers.set(7, old_pc);
+            cpu_state.registers[7] = old_pc;
         },
 
         Opcode::St | Opcode::Sti => {
