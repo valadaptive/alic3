@@ -1,9 +1,7 @@
 use std::cell::RefCell;
-use std::env::args;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::stdin;
-use std::io::{stdout, Stdin, Stdout};
+use std::io::{Stdin, Stdout};
 
 use byteorder::ReadBytesExt;
 use byteorder::{BigEndian, WriteBytesExt};

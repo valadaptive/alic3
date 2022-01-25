@@ -1,16 +1,12 @@
-use std::cell::RefCell;
 use std::env::args;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::stdin;
-use std::io::{stdout, Stdin, Stdout};
 
 use byteorder::ReadBytesExt;
-use byteorder::{BigEndian, WriteBytesExt};
+use byteorder::{BigEndian};
 
 use alic3::bit_twiddling::*;
 use alic3::opcode::*;
-use alic3::emulator::*;
 
 fn disassemble_instruction(instruction: u16) -> String {
     let mut parts = Vec::<String>::new();
