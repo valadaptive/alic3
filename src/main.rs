@@ -106,6 +106,14 @@ fn address_accessible(addr: u16, cpu_state: &CpuState) -> bool {
     addr >= 0x3000 && addr <= 0xFDFF
 }
 
+fn get_reg_hi(instruction: u16, cpu_state: &CpuState) -> u16 {
+    cpu_state.registers.get(get_bits::<9, 11>(instruction) as usize)
+}
+
+fn get_reg_lo(instruction: u16, cpu_state: &CpuState) -> u16 {
+    cpu_state.registers.get(get_bits::<6, 8>(instruction) as usize)
+}
+
 pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuState) {
     let opcode = Opcode::from_int(OP);
 
@@ -117,21 +125,17 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
         Opcode::Ldr |
         Opcode::Lea |
         Opcode::Not => {
-            let dst_register = get_bits::<9, 11>(instruction) as usize;
-
             let result = match opcode {
                 Opcode::Add | Opcode::And => {
-                    let src_register_1 = get_bits::<6, 8>(instruction) as usize;
                     let src_value_2 = if get_bits::<5, 5>(instruction) == 1 { // immediate mode
                         get_bits::<0, 4>(instruction)
                     } else {
-                        let src_register_2 = get_bits::<0, 2>(instruction) as usize;
-                        cpu_state.registers.get(src_register_2)
+                        cpu_state.registers.get(get_bits::<0, 2>(instruction) as usize)
                     };
 
                     match opcode {
-                        Opcode::Add => u16::wrapping_add(cpu_state.registers.get(src_register_1), src_value_2),
-                        Opcode::And => cpu_state.registers.get(src_register_1) & src_value_2,
+                        Opcode::Add => u16::wrapping_add(get_reg_lo(instruction, cpu_state), src_value_2),
+                        Opcode::And => get_reg_lo(instruction, cpu_state) & src_value_2,
                         _ => unreachable!(),
                     }
                 },
@@ -166,10 +170,8 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
                 },
 
                 Opcode::Ldr => {
-                    let base_register = get_bits::<6, 8>(instruction) as usize;
-                    let base_value = cpu_state.registers.get(base_register);
                     let offset = sign_extend::<6>(get_bits::<0, 5>(instruction) as i16);
-                    let addr = u16::wrapping_add(base_value, offset as u16);
+                    let addr = u16::wrapping_add( get_reg_lo(instruction, cpu_state), offset as u16);
                     if !address_accessible(addr, cpu_state) {
                         unimplemented!()
                     }
@@ -177,16 +179,13 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
                 },
 
                 Opcode::Not => {
-                    let src_register = get_bits::<6, 8>(instruction) as usize;
-                    let src_value = cpu_state.registers.get(src_register);
-
-                    !src_value
+                    !get_reg_lo(instruction, cpu_state)
                 },
 
                 _ => unreachable!()
             };
 
-            cpu_state.registers.set(dst_register, result);
+            cpu_state.registers.set(get_bits::<9, 11>(instruction) as usize, result);
             cpu_state.cc = match (result as i16).signum() {
                 -1 => COND_NEGATIVE,
                 0 => COND_ZERO,
@@ -204,9 +203,7 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
         },
 
         Opcode::Jmp => {
-            let base_register = get_bits::<6, 8>(instruction) as usize;
-            let base_value = cpu_state.registers.get(base_register);
-            cpu_state.pc = base_value;
+            cpu_state.pc = get_reg_lo(instruction, cpu_state);
         },
 
         Opcode::Jsr => {
@@ -217,15 +214,11 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
                 cpu_state.pc = u16::wrapping_add(cpu_state.pc, pc_offset as u16);
             } else {
                 // JSRR: absolute
-                let base_register = get_bits::<6, 8>(instruction) as usize;
-                let base_value = cpu_state.registers.get(base_register);
-                cpu_state.pc = base_value;
+                cpu_state.pc = get_reg_lo(instruction, cpu_state);
             }
         },
 
         Opcode::St | Opcode::Sti => {
-            let src_register = get_bits::<9, 11>(instruction) as usize;
-            let src_value = cpu_state.registers.get(src_register);
             let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
             let mut addr = u16::wrapping_add(cpu_state.pc, pc_offset as u16);
 
@@ -241,20 +234,16 @@ pub fn execute_instruction<const OP: u8>(instruction: u16, cpu_state: &mut CpuSt
                 }
             }
 
-            cpu_state.memory.set(addr, src_value);
+            cpu_state.memory.set(addr, get_reg_hi(instruction, cpu_state));
         },
 
         Opcode::Str => {
-            let base_register = get_bits::<6, 8>(instruction) as usize;
-            let base_value = cpu_state.registers.get(base_register);
             let offset = sign_extend::<6>(get_bits::<0, 5>(instruction) as i16);
-            let addr = u16::wrapping_add(base_value, offset as u16);
+            let addr = u16::wrapping_add(get_reg_lo(instruction, cpu_state), offset as u16);
             if !address_accessible(addr, cpu_state) {
                 unimplemented!()
             }
-            let src_register = get_bits::<9, 11>(instruction) as usize;
-            let src_value = cpu_state.registers.get(src_register);
-            cpu_state.memory.set(addr, src_value);
+            cpu_state.memory.set(addr, get_reg_hi(instruction, cpu_state));
         },
 
         Opcode::Rti => unimplemented!(),
