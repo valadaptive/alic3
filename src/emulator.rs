@@ -439,14 +439,14 @@ impl Cpu {
     pub fn should_halt(&mut self) -> bool {
         self.memory.get(MCR) & (1 << 15) == 0
     }
-}
 
-pub fn read_program_to_cpu(mut file: File, cpu: &mut Cpu) -> std::io::Result<()> {
-    let mut buf = Vec::new();
-    let origin = file.read_u16::<BigEndian>()? as usize;
-    file.read_to_end(&mut buf)?;
-    buf.chunks(2).enumerate().for_each(|(i, chunk)| {
-        cpu.memory.memory[i + origin] = ((chunk[0] as u16) << 8) | (chunk[1] as u16)
-    });
-    Ok(())
+    pub fn load_program<F>(&mut self, mut file: F) -> std::io::Result<()> where F: Read {
+        let mut buf = Vec::new();
+        let origin = file.read_u16::<BigEndian>()? as usize;
+        file.read_to_end(&mut buf)?;
+        buf.chunks(2).enumerate().for_each(|(i, chunk)| {
+            self.memory.memory[i + origin] = ((chunk[0] as u16) << 8) | (chunk[1] as u16)
+        });
+        Ok(())
+    }
 }

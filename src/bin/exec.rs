@@ -19,8 +19,8 @@ fn main() -> anyhow::Result<()> {
     let stdin = stdin();
     let stdout_v = stdout();
     let mut cpu = Cpu::new(stdin, stdout_v);
-    read_program_to_cpu(os, &mut cpu)?;
-    read_program_to_cpu(pgm, &mut cpu)?;
+    cpu.load_program(os)?;
+    cpu.load_program(pgm)?;
 
     cpu.pc = 0x0200;
     loop {
