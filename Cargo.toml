@@ -11,6 +11,7 @@ features = "by_the_book"
 anyhow = "1"
 byteorder = "1"
 crossterm = "0.22"
+logos = "0.12"
 
 [features]
 default = []
@@ -23,6 +24,10 @@ path = "src/lib.rs"
 [[bin]]
 name = "exec"
 path = "src/bin/exec.rs"
+
+[[bin]]
+name = "asm"
+path = "src/bin/asm.rs"
 
 [[bin]]
 name = "disasm"

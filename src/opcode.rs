@@ -13,7 +13,7 @@ pub enum Opcode {
     Not = 9,
     Ldi = 10,
     Sti = 11,
-    Jmp = 12, // also RET
+    Jmp = 12,
     Reserved = 13,
     Lea = 14,
     Trap = 15,
@@ -21,31 +21,45 @@ pub enum Opcode {
 
 impl Opcode {
     pub const fn from_int(i: u8) -> Self {
-        match Self::try_from_int(i) {
-            Ok(op) => op,
-            Err(_) => panic!("unknown opcode"),
+        match i {
+            0 => Self::Br,
+            1 => Self::Add,
+            2 => Self::Ld,
+            3 => Self::St,
+            4 => Self::Jsr,
+            5 => Self::And,
+            6 => Self::Ldr,
+            7 => Self::Str,
+            8 => Self::Rti,
+            9 => Self::Not,
+            10 => Self::Ldi,
+            11 => Self::Sti,
+            12 => Self::Jmp,
+            13 => Self::Reserved,
+            14 => Self::Lea,
+            15 => Self::Trap,
+            _ => panic!("invalid opcode"),
         }
     }
 
-    pub const fn try_from_int(i: u8) -> Result<Self, ()> {
-        match i {
-            0 => Ok(Opcode::Br),
-            1 => Ok(Opcode::Add),
-            2 => Ok(Opcode::Ld),
-            3 => Ok(Opcode::St),
-            4 => Ok(Opcode::Jsr),
-            5 => Ok(Opcode::And),
-            6 => Ok(Opcode::Ldr),
-            7 => Ok(Opcode::Str),
-            8 => Ok(Opcode::Rti),
-            9 => Ok(Opcode::Not),
-            10 => Ok(Opcode::Ldi),
-            11 => Ok(Opcode::Sti),
-            12 => Ok(Opcode::Jmp), // also RET
-            13 => Ok(Opcode::Reserved),
-            14 => Ok(Opcode::Lea),
-            15 => Ok(Opcode::Trap),
-            _ => Err(()),
+    pub const fn to_int(&self) -> u16 {
+        match self {
+            Self::Br => 0,
+            Self::Add => 1,
+            Self::Ld => 2,
+            Self::St => 3,
+            Self::Jsr => 4,
+            Self::And => 5,
+            Self::Ldr => 6,
+            Self::Str => 7,
+            Self::Rti => 8,
+            Self::Not => 9,
+            Self::Ldi => 10,
+            Self::Sti => 11,
+            Self::Jmp => 12,
+            Self::Reserved => 13,
+            Self::Lea => 14,
+            Self::Trap => 15,
         }
     }
 }
