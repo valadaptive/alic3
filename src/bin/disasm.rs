@@ -2,8 +2,8 @@ use std::env::args;
 use std::fs::File;
 use std::io::prelude::*;
 
+use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
-use byteorder::{BigEndian};
 
 use alic3::bit_twiddling::*;
 use alic3::opcode::*;
@@ -139,8 +139,13 @@ fn main() -> anyhow::Result<()> {
     pgm.read_u16::<BigEndian>()?;
     pgm.read_to_end(&mut buf)?;
     buf.chunks(2).enumerate().for_each(|(i, chunk)| {
-       let instruction = ((chunk[0] as u16) << 8) | (chunk[1] as u16);
-       println!("{:#06x}: {:#06x} ({})", i, instruction, disassemble_instruction(instruction));
+        let instruction = ((chunk[0] as u16) << 8) | (chunk[1] as u16);
+        println!(
+            "{:#06x}: {:#06x} ({})",
+            i,
+            instruction,
+            disassemble_instruction(instruction)
+        );
     });
 
     Ok(())

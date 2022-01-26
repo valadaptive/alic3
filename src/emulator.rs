@@ -459,7 +459,10 @@ impl Cpu {
         self.memory.get(MCR) & (1 << 15) == 0
     }
 
-    pub fn load_program<F>(&mut self, mut file: F) -> std::io::Result<()> where F: Read {
+    pub fn load_program<F>(&mut self, mut file: F) -> std::io::Result<()>
+    where
+        F: Read,
+    {
         let mut buf = Vec::new();
         let origin = file.read_u16::<BigEndian>()? as usize;
         file.read_to_end(&mut buf)?;

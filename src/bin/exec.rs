@@ -1,7 +1,7 @@
 use std::env::args;
 use std::fs::File;
 use std::io::stdin;
-use std::io::{stdout};
+use std::io::stdout;
 
 use alic3::emulator::*;
 
