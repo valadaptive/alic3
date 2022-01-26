@@ -152,6 +152,7 @@ impl Cpu {
     }
 
     fn enter_supervisor_mode(&mut self) {
+        #[cfg(feature = "by_the_book")]
         let old_psr = self.memory.get(PSR);
         if get_bits::<15, 15>(self.memory.get(PSR)) == 1 {
             // Switch from the user stack pointer to the system stack pointer
@@ -316,6 +317,8 @@ impl Cpu {
             }
 
             Opcode::Jmp => {
+                // TODO: it looks like there's no protection against jumping into the middle of privileged code.
+                // The book has nothing to say on the matter but it may be useful to implement protections against that.
                 self.pc = self.get_reg_lo(instruction);
 
                 // Undocumented JMPT/RTT instruction. No idea who came up with this or where it is or isn't implemented.

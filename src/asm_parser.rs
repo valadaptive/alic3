@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Error, Result};
 use logos::{Lexer, Logos};
 
@@ -113,7 +115,7 @@ enum Token<'a> {
 }
 
 #[derive(Debug)]
-pub struct Register(u16);
+pub struct Register(pub u16);
 
 #[derive(Debug)]
 pub enum RegOrImm {
@@ -189,7 +191,7 @@ pub enum Operation<'a> {
         offset: u16,
     },
     Trap {
-        vector: u8,
+        vector: u16,
     },
 }
 
@@ -223,11 +225,13 @@ pub enum Instruction<'a> {
 pub struct CodeLine<'a> {
     pub label: Option<&'a str>,
     pub instruction: Instruction<'a>,
+    pub location: u16,
 }
 
 pub struct Program<'a> {
     pub origin: u16,
     pub lines: Vec<CodeLine<'a>>,
+    pub labels: HashMap<&'a str, u16>,
 }
 
 struct Scanner<'a> {
@@ -253,6 +257,8 @@ impl<'a> Scanner<'a> {
 
 pub struct Parser<'a> {
     scanner: Scanner<'a>,
+    location_cursor: u16,
+    labels: HashMap<&'a str, u16>,
 }
 
 impl<'a> Parser<'a> {
@@ -279,7 +285,7 @@ impl<'a> Parser<'a> {
             _ => Ok(None),
         }
     }
-    fn parse_string(&mut self) -> Option<Vec<u8>> {
+    fn parse_string(&mut self) -> Result<Option<Vec<u8>>> {
         match self.scanner.peek() {
             Some(Token::String(s)) => {
                 let mut chars = Vec::<u8>::with_capacity(s.len());
@@ -300,7 +306,7 @@ impl<'a> Parser<'a> {
                                 b'v' => chars.push(b'\x0B'),
                                 b'"' => chars.push(b'"'),
                                 b'\\' => chars.push(b'\\'),
-                                _ => (),
+                                _ => chars.push(*char),
                             };
                             prev_was_escaped = false;
                         } else {
@@ -308,12 +314,16 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
+                chars.push(b'\x00');
+                if chars.len() >= 0xffff {
+                    return Err(anyhow!("String does not fit in memory"));
+                }
                 chars.shrink_to_fit();
 
                 self.scanner.next();
-                Some(chars)
+                Ok(Some(chars))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 
@@ -515,9 +525,7 @@ impl<'a> Parser<'a> {
                 let vector = self.parse_number()?.ok_or_else(|| {
                     anyhow!("Expected number (Trap), got {:?}", self.scanner.peek())
                 })?;
-                Ok(Some(Instruction::Operation(Operation::Trap {
-                    vector: vector as u8,
-                })))
+                Ok(Some(Instruction::Operation(Operation::Trap { vector })))
             }
 
             Some(Token::Orig) => {
@@ -544,7 +552,7 @@ impl<'a> Parser<'a> {
             Some(Token::Stringz) => {
                 self.scanner.next();
                 let string = self
-                    .parse_string()
+                    .parse_string()?
                     .ok_or_else(|| anyhow!("Expected string, got {:?}", self.scanner.peek()))?;
                 Ok(Some(Instruction::PseudoOp(PseudoOp::Stringz(string))))
             }
@@ -559,7 +567,7 @@ impl<'a> Parser<'a> {
             }
             Some(Token::Halt) => {
                 self.scanner.next();
-                Ok(Some(Instruction::Trap(Trap::Getc)))
+                Ok(Some(Instruction::Trap(Trap::Halt)))
             }
             Some(Token::In) => {
                 self.scanner.next();
@@ -587,21 +595,46 @@ impl<'a> Parser<'a> {
         let instruction = self
             .parse_instruction()?
             .ok_or_else(|| anyhow!("Expected instruction, got {:?}", self.scanner.peek()))?;
-        Ok(CodeLine { label, instruction })
+
+        Ok(CodeLine {
+            label,
+            instruction,
+            location: self.location_cursor,
+        })
     }
 
-    fn parse_program(&mut self) -> Result<Program<'a>, Error> {
+    fn parse_program(&mut self) -> Result<(u16, Vec<CodeLine<'a>>), Error> {
         match self.parse_instruction()? {
             Some(Instruction::PseudoOp(PseudoOp::Orig(origin))) => {
+                self.location_cursor = origin;
                 let mut lines = Vec::<CodeLine>::new();
                 loop {
                     let line = self.parse_code_line()?;
                     if let Instruction::PseudoOp(PseudoOp::End) = line.instruction {
                         break;
                     }
+
+                    // Keep track of instructions' locations in memory
+                    let location_increment = match &line.instruction {
+                        Instruction::PseudoOp(PseudoOp::Blkw(n)) => *n,
+                        Instruction::PseudoOp(PseudoOp::Stringz(string)) => string.len() as u16,
+                        _ => 1,
+                    };
+                    self.location_cursor = self
+                        .location_cursor
+                        .checked_add(location_increment)
+                        .ok_or_else(|| anyhow!("Program goes past the end of memory"))?;
+                    if self.location_cursor >= 0xfe00 {
+                        return Err(anyhow!("Program goes into device register space"));
+                    }
+
+                    if let Some(label) = line.label {
+                        self.labels.insert(label, line.location);
+                    }
+
                     lines.push(line);
                 }
-                Ok(Program { origin, lines })
+                Ok((origin, lines))
             }
             _ => Err(anyhow!("Expected .ORIG")),
         }
@@ -612,8 +645,15 @@ impl<'a> Parser<'a> {
 
         let mut parser = Self {
             scanner: Scanner::new(lexer),
+            location_cursor: 0,
+            labels: HashMap::new(),
         };
 
-        parser.parse_program()
+        let (origin, lines) = parser.parse_program()?;
+        Ok(Program {
+            origin,
+            lines,
+            labels: parser.labels,
+        })
     }
 }
