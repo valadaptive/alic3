@@ -12,6 +12,7 @@ anyhow = "1"
 byteorder = "1"
 crossterm = "0.22"
 logos = "0.12"
+thiserror = "1"
 
 [features]
 default = []

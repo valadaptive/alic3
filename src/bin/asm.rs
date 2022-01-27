@@ -21,10 +21,31 @@ fn main() -> anyhow::Result<()> {
     let mut asm_str = String::new();
     asm.read_to_string(&mut asm_str)?;
 
-    let program = Parser::parse(&asm_str)?;
-    for line in &program.lines {
-        println!("{:?}", line);
-    }
+    let program = Parser::parse(&asm_str).map_err(|err| {
+        let start = err.span.start;
+        let mut cursor_pos = start;
+        let mut stop = false;
+        let mut line_num: usize = 0;
+        let err_line = asm_str
+            .split('\n')
+            .map_while(|line| {
+                if stop {
+                    return None;
+                }
+                if line.len() >= cursor_pos {
+                    stop = true;
+                } else {
+                    cursor_pos -= line.len() + 1;
+                }
+                line_num += 1;
+                Some(line.trim_end())
+            })
+            .last()
+            .unwrap();
+        println!("{}", err_line);
+        println!("{}^", "-".repeat(cursor_pos));
+        anyhow::anyhow!("Line {}: {}", line_num, err)
+    })?;
 
     let machine_code = assemble(program)?;
 

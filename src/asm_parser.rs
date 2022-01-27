@@ -1,7 +1,11 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+};
 
 use anyhow::{anyhow, Error, Result};
-use logos::{Lexer, Logos};
+use logos::{Lexer, Logos, Span};
+use thiserror::Error;
 
 fn num<'a>(lex: &mut Lexer<'a, Token<'a>>) -> Result<i64> {
     let slice = lex.slice();
@@ -252,6 +256,20 @@ impl<'a> Scanner<'a> {
         let old_next = self.next_token;
         self.next_token = self.lexer.next();
         old_next
+    }
+}
+
+#[derive(Error, Debug)]
+pub struct ParseError {
+    msg: String,
+    pub span: Span,
+    source: anyhow::Error,
+}
+
+impl Display for ParseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str(&self.msg)?;
+        Ok(())
     }
 }
 
@@ -640,7 +658,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(string: &'a str) -> Result<Program<'a>, Error> {
+    pub fn parse(string: &'a str) -> Result<Program<'a>, ParseError> {
         let lexer = Token::lexer(string);
 
         let mut parser = Self {
@@ -649,7 +667,12 @@ impl<'a> Parser<'a> {
             labels: HashMap::new(),
         };
 
-        let (origin, lines) = parser.parse_program()?;
+        let (origin, lines) = parser.parse_program().map_err(|err| ParseError {
+            msg: err.to_string(),
+            span: parser.scanner.lexer.span(),
+            source: err,
+        })?;
+
         Ok(Program {
             origin,
             lines,
