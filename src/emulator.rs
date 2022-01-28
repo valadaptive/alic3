@@ -245,7 +245,6 @@ impl Cpu {
 
                         match opcode {
                             // load effective address: just return the address
-                            // TODO: don't set condition codes in third_edition
                             Opcode::Lea => addr,
                             // load direct
                             Opcode::Ld => {
@@ -288,6 +287,13 @@ impl Cpu {
                 };
 
                 self.registers[get_bits::<9, 11>(instruction) as usize] = result;
+
+                // Third edition: LEA doesn't set condition codes
+                #[cfg(not(feature = "third_edition"))]
+                if let Opcode::Lea = opcode {
+                    return;
+                }
+
                 // Replace lower 3 bits of PSR with the new condition bits
                 self.memory.set(
                     PSR,

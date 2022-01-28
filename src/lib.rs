@@ -3,3 +3,5 @@ pub mod assembler;
 pub mod bit_twiddling;
 pub mod emulator;
 pub mod opcode;
+#[cfg(feature = "gui")]
+pub mod gui;
