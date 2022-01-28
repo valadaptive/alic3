@@ -152,7 +152,6 @@ impl Cpu {
     }
 
     fn enter_supervisor_mode(&mut self) {
-        #[cfg(feature = "by_the_book")]
         let old_psr = self.memory.get(PSR);
         if get_bits::<15, 15>(self.memory.get(PSR)) == 1 {
             // Switch from the user stack pointer to the system stack pointer
@@ -162,17 +161,11 @@ impl Cpu {
             self.memory.set(PSR, self.memory.get(PSR) & !(1 << 15));
         }
 
-        // An implementation following the book will push the old PSR and PC to the stack, to be restored later by RTI.
-        // This allows for arbitrary nesting of system calls. In practice, I haven't come across an emulator that
-        // actually implements RTI, and instead trap handlers store the PC in R7 and seem to not preserve the PSR.
-        #[cfg(feature = "by_the_book")]
-        {
-            // Push old PSR and PC to stack
-            self.registers[6] -= 1;
-            self.memory.set(self.registers[6], old_psr);
-            self.registers[6] -= 1;
-            self.memory.set(self.registers[6], self.pc);
-        }
+        // Push old PSR and PC to stack
+        self.registers[6] -= 1;
+        self.memory.set(self.registers[6], old_psr);
+        self.registers[6] -= 1;
+        self.memory.set(self.registers[6], self.pc);
     }
 
     fn handle_exception(&mut self, exception_vector: u8) {
@@ -252,6 +245,7 @@ impl Cpu {
 
                         match opcode {
                             // load effective address: just return the address
+                            // TODO: don't set condition codes in third_edition
                             Opcode::Lea => addr,
                             // load direct
                             Opcode::Ld => {
@@ -413,10 +407,12 @@ impl Cpu {
             }
 
             Opcode::Trap => {
+                // In the third-edition LC-3, the old PC and PSR are stored on the stack and supervisor mode is entered
+                #[cfg(feature = "third_edition")]
                 self.enter_supervisor_mode();
 
-                // It's not documented anywhere in the book, but TRAP sets R7 to the previous PC
-                #[cfg(not(feature = "by_the_book"))]
+                // In the second-edition LC-3, TRAP sets R7 to the previous PC
+                #[cfg(not(feature = "third_edition"))]
                 {
                     self.registers[7] = self.pc;
                 }
