@@ -86,6 +86,8 @@ impl<T: Read> KeyboardIO<T> {
             self.kbdr = keycode as u16;
             self.kbsr = true;
             self.need_more_input = false;
+        } else {
+            self.kbsr = false;
         }
     }
 
