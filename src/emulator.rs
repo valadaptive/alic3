@@ -20,13 +20,13 @@ const PSR: u16 = 0xFFFC;
 /// When the top bit is cleared, the emulator exits.
 const MCR: u16 = 0xFFFE;
 
-struct Memory {
+struct Memory<Input: Read, Output: Write> {
     memory: [u16; MEMORY_SIZE],
-    keyboard_io: RefCell<KeyboardIO>,
-    stdout: Stdout,
+    keyboard_io: RefCell<KeyboardIO<Input>>,
+    stdout: Output,
 }
 
-impl Memory {
+impl<Input: Read, Output: Write> Memory<Input, Output> {
     fn get(&self, addr: u16) -> u16 {
         match addr {
             // Keyboard status register
@@ -58,15 +58,15 @@ impl Memory {
     }
 }
 
-struct KeyboardIO {
+struct KeyboardIO<T: Read> {
     need_more_input: bool,
     kbsr: bool,
     kbdr: u16,
-    stdin: Stdin,
+    stdin: T,
 }
 
-impl KeyboardIO {
-    fn new(stdin: Stdin) -> Self {
+impl<T: Read> KeyboardIO<T> {
+    fn new(stdin: T) -> Self {
         KeyboardIO {
             need_more_input: true,
             kbsr: false,
@@ -109,11 +109,11 @@ const COND_NEGATIVE: u16 = 0b100;
 const COND_ZERO: u16 = 0b010;
 const COND_POSITIVE: u16 = 0b001;
 
-pub struct Cpu {
+pub struct Cpu<Input: Read, Output: Write> {
     /// All CPU registers
     registers: [u16; 8],
     /// RAM
-    memory: Memory,
+    memory: Memory<Input, Output>,
     /// Program counter
     pub pc: u16,
     /// The saved user mode stack pointer
@@ -122,8 +122,8 @@ pub struct Cpu {
     saved_ssp: u16,
 }
 
-impl Cpu {
-    pub fn new(stdin: Stdin, stdout: Stdout) -> Self {
+impl<Input: Read, Output: Write> Cpu<Input, Output> {
+    pub fn new(stdin: Input, stdout: Output) -> Self {
         let mut mem_raw = [0u16; MEMORY_SIZE];
         // Initialize MCR so we don't halt immediately
         mem_raw[MCR as usize] = 0xFFFF;
