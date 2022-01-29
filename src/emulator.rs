@@ -45,6 +45,12 @@ impl<Input: Read, Output: Write> Memory<Input, Output> {
             0xFE00 | 0xFE02 | 0xFE04 => (),
             // Display data register
             0xFE06 => {
+                // Because we're in raw mode so we can get each character individually, line feeds don't reset the
+                // cursor position to the left. Do that manually.
+                // TODO: proper terminal driver
+                if value == (b'\n' as u16) {
+                    let _ = self.stdout.write_u8(b'\r');
+                }
                 // Ignore potential errors writing to stdout
                 let _ = self.stdout.write_u8((value & 0xFF) as u8);
                 // TODO: flushing stdout after every character seems expensive but also the only way to ensure proper
