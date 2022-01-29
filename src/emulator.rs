@@ -10,15 +10,33 @@ use crate::opcode::*;
 
 const MEMORY_SIZE: usize = (u16::MAX as usize) + 1;
 
-/// Program status register.
-/// `psr[15]` is 1 if running in user mode, 0 if in supervisor mode.
-/// `psr[10:8]` specifies the priority level of the currently running process.
-/// `psr[2:0]` holds condition codes (set depending on whether the previous result was positive, negative, or zero)
-const PSR: u16 = 0xFFFC;
+/// Memory addresses of all memory-mapped registers
+struct MemRegisters {}
 
-/// Machine control register.
-/// When the top bit is cleared, the emulator exits.
-const MCR: u16 = 0xFFFE;
+impl MemRegisters {
+    /// Program status register.
+    /// `PSR[15]` is 1 if running in user mode, 0 if in supervisor mode.
+    /// `PSR[10:8]` specifies the priority level of the currently running process.
+    /// `PSR[2:0]` holds condition codes (set depending on whether the previous result was positive, negative, or zero)
+    const PSR: u16 = 0xFFFC;
+    /// Machine control register.
+    /// When the top bit is cleared, the emulator exits.
+    const MCR: u16 = 0xFFFE;
+
+    /// Keyboard status register.
+    /// The top bit is set when the keyboard has more data to read. Reading that data will clear the top bit.
+    const KBSR: u16 = 0xFE00;
+    /// Keyboard data register.
+    /// Holds the key code of the key that was most recently pressed.
+    const KBDR: u16 = 0xFE02;
+
+    /// Display status register.
+    /// The top bit is set when the display is ready for data to be written to it. Currently that's always the case.
+    const DSR: u16 = 0xFE04;
+    /// Display data register.
+    /// Writing a character into this register will print that character to the display.
+    const DDR: u16 = 0xFE06;
+}
 
 struct Memory<Input: Read, Output: Write> {
     memory: [u16; MEMORY_SIZE],
@@ -29,12 +47,10 @@ struct Memory<Input: Read, Output: Write> {
 impl<Input: Read, Output: Write> Memory<Input, Output> {
     fn get(&self, addr: u16) -> u16 {
         match addr {
-            // Keyboard status register
-            0xFE00 => self.keyboard_io.borrow_mut().read_kbsr(),
-            // Keyboard data register
-            0xFE02 => self.keyboard_io.borrow_mut().read_kbdr(),
-            // Display status register--the display is always ready for more data
-            0xFE04 => 0x8000,
+            MemRegisters::KBSR => self.keyboard_io.borrow_mut().read_kbsr(),
+            MemRegisters::KBDR => self.keyboard_io.borrow_mut().read_kbdr(),
+            // The display is always ready for more data
+            MemRegisters::DSR => 0x8000,
             _ => self.memory[addr as usize],
         }
     }
@@ -42,9 +58,8 @@ impl<Input: Read, Output: Write> Memory<Input, Output> {
     fn set(&mut self, addr: u16, value: u16) {
         match addr {
             // Ignore writes into status/read-only registers
-            0xFE00 | 0xFE02 | 0xFE04 => (),
-            // Display data register
-            0xFE06 => {
+            MemRegisters::KBSR | MemRegisters::KBDR | MemRegisters::DSR => (),
+            MemRegisters::DDR => {
                 // Because we're in raw mode so we can get each character individually, line feeds don't reset the
                 // cursor position to the left. Do that manually.
                 // TODO: proper terminal driver
@@ -134,7 +149,7 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
     pub fn new(stdin: Input, stdout: Output) -> Self {
         let mut mem_raw = [0u16; MEMORY_SIZE];
         // Initialize MCR so we don't halt immediately
-        mem_raw[MCR as usize] = 0xFFFF;
+        mem_raw[MemRegisters::MCR as usize] = 0xFFFF;
         Cpu {
             registers: [0u16; 8],
             memory: Memory {
@@ -152,7 +167,7 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
 
     fn address_accessible(&self, addr: u16) -> bool {
         // Only protect memory if not in privileged mode
-        if get_bits::<15, 15>(self.memory.get(PSR)) == 0 {
+        if get_bits::<15, 15>(self.memory.get(MemRegisters::PSR)) == 0 {
             return true;
         }
 
@@ -160,16 +175,19 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
     }
 
     fn enter_supervisor_mode(&mut self) {
-        let old_psr = self.memory.get(PSR);
-        if get_bits::<15, 15>(self.memory.get(PSR)) == 1 {
+        let old_psr = self.memory.get(MemRegisters::PSR);
+        if get_bits::<15, 15>(self.memory.get(MemRegisters::PSR)) == 1 {
             // Switch from the user stack pointer to the system stack pointer
             self.saved_usp = self.registers[6];
             self.registers[6] = self.saved_ssp;
             // Clear the "is user mode" bit of the PSR
-            self.memory.set(PSR, self.memory.get(PSR) & !(1 << 15));
+            self.memory.set(
+                MemRegisters::PSR,
+                self.memory.get(MemRegisters::PSR) & !(1 << 15),
+            );
         }
 
-        // Push old PSR and PC to stack
+        // Push old MemRegisters::PSR and PC to stack
         self.registers[6] -= 1;
         self.memory.set(self.registers[6], old_psr);
         self.registers[6] -= 1;
@@ -194,13 +212,15 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
     }
 
     fn get_priority_level(&self) -> u16 {
-        return (self.memory.get(PSR) >> 8) & 0b111;
+        return (self.memory.get(MemRegisters::PSR) >> 8) & 0b111;
     }
 
     fn set_priority_level(&mut self, level: u16) {
         assert!(level <= 7);
-        self.memory
-            .set(PSR, (self.memory.get(PSR) & !0b11100000000) | (level << 8));
+        self.memory.set(
+            MemRegisters::PSR,
+            (self.memory.get(MemRegisters::PSR) & !0b11100000000) | (level << 8),
+        );
     }
 
     /// Read the contents of the register specified in the high bits of an instruction (a common operation).
@@ -304,8 +324,8 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
 
                 // Replace lower 3 bits of PSR with the new condition bits
                 self.memory.set(
-                    PSR,
-                    (self.memory.get(PSR) & !0b111)
+                    MemRegisters::PSR,
+                    (self.memory.get(MemRegisters::PSR) & !0b111)
                         | match (result as i16).signum() {
                             -1 => COND_NEGATIVE,
                             0 => COND_ZERO,
@@ -318,7 +338,7 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
             Opcode::Br => {
                 let nzp = get_bits::<9, 11>(instruction);
                 // This will only match the lowest 3 bits, which store the condition codes
-                if (nzp & self.memory.get(PSR)) > 0 {
+                if (nzp & self.memory.get(MemRegisters::PSR)) > 0 {
                     let pc_offset = sign_extend::<9>(get_bits::<0, 8>(instruction) as i16);
                     self.pc = u16::wrapping_add(self.pc, pc_offset as u16);
                 }
@@ -334,7 +354,7 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
                 // The only other way to do this is to modify the PSR directly.
                 // Commenting this out for now because I have no idea about the specifics of its functionality.
                 /* if get_bits::<0, 0>(instruction) == 1 {
-                    if get_bits::<15, 15>(self.memory.get(PSR)) == 1 {
+                    if get_bits::<15, 15>(self.memory.get(MemRegisters::PSR)) == 1 {
                         // Tried to execute JMPT/RTT from user mode--trigger a privilege mode violation
                         // TODO: do the emulators actually do this? do they even check the privilege bit at all?
                         // how has no one actually fully implemented this architecture?
@@ -342,8 +362,8 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
                         return;
                     }
 
-                    // Set user-mode PSR bit
-                    self.memory.get(PSR) |= 1 << 15;
+                    // Set user-mode MemRegisters::PSR bit
+                    self.memory.get(MemRegisters::PSR) |= 1 << 15;
                 } */
             }
 
@@ -394,7 +414,7 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
             }
 
             Opcode::Rti => {
-                if get_bits::<15, 15>(self.memory.get(PSR)) == 1 {
+                if get_bits::<15, 15>(self.memory.get(MemRegisters::PSR)) == 1 {
                     // Tried to execute RTI from user mode--trigger a privilege mode violation
                     self.handle_exception(0x00);
                     return;
@@ -407,9 +427,9 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
                 // TODO: the book says to pop the system stack before restoring the PSR. Why?
                 let new_psr = self.memory.get(self.registers[6]);
                 self.registers[6] += 1;
-                self.memory.set(PSR, new_psr);
+                self.memory.set(MemRegisters::PSR, new_psr);
 
-                if get_bits::<15, 15>(self.memory.get(PSR)) == 1 {
+                if get_bits::<15, 15>(self.memory.get(MemRegisters::PSR)) == 1 {
                     // We are now back in user mode
                     self.saved_ssp = self.registers[6];
                     self.registers[6] = self.saved_usp;
@@ -468,7 +488,7 @@ impl<Input: Read, Output: Write> Cpu<Input, Output> {
     }
 
     pub fn should_halt(&mut self) -> bool {
-        self.memory.get(MCR) & (1 << 15) == 0
+        self.memory.get(MemRegisters::MCR) & (1 << 15) == 0
     }
 
     pub fn load_program<F>(&mut self, mut file: F) -> std::io::Result<()>
