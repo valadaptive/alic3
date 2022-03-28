@@ -136,13 +136,13 @@ fn main() -> anyhow::Result<()> {
     let mut pgm = File::open(&args[1])?;
 
     let mut buf = Vec::new();
-    pgm.read_u16::<BigEndian>()?;
+    let origin = pgm.read_u16::<BigEndian>()? as usize;
     pgm.read_to_end(&mut buf)?;
     buf.chunks(2).enumerate().for_each(|(i, chunk)| {
         let instruction = ((chunk[0] as u16) << 8) | (chunk[1] as u16);
         println!(
             "{:#06x}: {:#06x} ({})",
-            i,
+            i + origin,
             instruction,
             disassemble_instruction(instruction)
         );
